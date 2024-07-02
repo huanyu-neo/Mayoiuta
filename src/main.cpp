@@ -2,8 +2,9 @@
 #include <Adafruit_BMP085.h>
 #include <MPU6050.h>
 #include <Servo.h>
-#include <WiFi.h>
-#include <WiFiClient.h>
+#include <SoftwareSerial.h>
+
+SoftwareSerial esp8266(2, 3); // RX, TX
 
 // WiFi连接信息
 const char* ssid = "mainly";
@@ -11,7 +12,6 @@ const char* password = "";
 
 // 服务器信息
 const char* server = "data.awaland.xyz";
-const int port = 443; // 使用HTTPS，默认端口443
 
 // 创建传感器和伺服电机对象
 Adafruit_BMP085 bmp;
@@ -38,6 +38,7 @@ double errorY, lastErrorY, outputY;
 
 void setup() {
     Serial.begin(9600);
+    esp8266.begin(115200); // ESP8266 baud rate
 
     // 初始化WiFi连接
     connectWiFi();
@@ -69,7 +70,6 @@ void setup() {
 }
 
 void loop() {
-    // 读取气压和温度数据
     Serial.print("Temperature = "); 
     Serial.print(bmp.readTemperature());
     Serial.println(" *C");
@@ -80,43 +80,40 @@ void loop() {
     Serial.print(bmp.readAltitude(101500)); 
     Serial.println(" meters");
     Serial.println();
-
-    // 读取姿态数据
     int16_t ax, ay, az;
     int16_t gx, gy, gz;
     mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
-
-    // 转换为姿态角度（简单示例，实际应用需要更多处理）
     float pitch = atan2(ay, az) * 180 / PI;
     float roll = atan2(ax, az) * 180 / PI;
-
-    // 输出姿态数据
     Serial.print("Pitch = ");
     Serial.print(pitch);
     Serial.println(" degrees");
     Serial.print("Roll = ");
     Serial.print(roll);
     Serial.println(" degrees");
-
-    // 使用PID控制调整伺服电机角度
     computePID(servoX, pitch, pidSetpointX, pidOutputX, pidInputX, lastErrorX, outputX);
     computePID(servoY, roll, pidSetpointY, pidOutputY, pidInputY, lastErrorY, outputY);
-
-    // 发送数据到服务器
     sendDataToServer(pitch, roll);
-
     delay(500);
 }
 
 // 连接WiFi函数
 void connectWiFi() {
-    Serial.println("Connecting to WiFi...");
-    WiFi.begin(ssid, password);
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(1000);
-        Serial.println("Connecting to WiFi...");
+    sendATCommand("AT", "OK", 1000);
+    sendATCommand("AT+CWMODE=1", "OK", 1000);
+    sendATCommand("AT+CWJAP=\"" + String(ssid) + "\",\"" + String(password) + "\"", "OK", 10000);
+}
+
+void sendATCommand(String command, String response, unsigned long timeout) {
+    esp8266.println(command);
+    unsigned long start = millis();
+    while (millis() - start < timeout) {
+        if (esp8266.find(response.c_str())) {
+            Serial.println(command + " executed successfully");
+            return;
+        }
     }
-    Serial.println("Connected to WiFi");
+    Serial.println(command + " failed");
 }
 
 // PID计算函数
@@ -124,7 +121,7 @@ void computePID(Servo &servo, double input, double setpoint, double &output, dou
     unsigned long currentTime = millis();
     elapsedTime = (double)(currentTime - previousTime) / 1000;
 
-    error = setpoint - input;
+    double error = setpoint - input;
     pidInput += error * elapsedTime;
 
     output = Kp * error + Ki * pidInput + Kd * (error - lastError) / elapsedTime;
@@ -139,24 +136,16 @@ void computePID(Servo &servo, double input, double setpoint, double &output, dou
 
 // 发送数据到服务器
 void sendDataToServer(float pitch, float roll) {
-    WiFiClient client;
+    String data = "pitch=" + String(pitch) + "&roll=" + String(roll);
+    String postRequest = "POST / HTTP/1.1\r\n" +
+                            "Host: " + String(server) + "\r\n" +
+                            "Content-Type: application/x-www-form-urlencoded\r\n" +
+                            "Content-Length: " + data.length() + "\r\n" +
+                            "\r\n" + data;
 
-    if (!client.connect(server, port)) {
-        Serial.println("Connection failed");
-        return;
-    }
-
-    String url = "/"; // 在这里添加你的具体路径
-
-    String postData = "pitch=" + String(pitch) + "&roll=" + String(roll);
-
-    client.print(String("POST ") + url + " HTTP/1.1\r\n" +
-                    "Host: " + server + "\r\n" +
-                    "Content-Length: " + postData.length() + "\r\n" +
-                    "Content-Type: application/x-www-form-urlencoded\r\n" +
-                    "\r\n" + postData);
-
-    Serial.println("Data sent to server");
-
-    client.stop();
+    sendATCommand("AT+CIPSTART=\"TCP\",\"" + String(server) + "\",80", "OK", 10000);
+    sendATCommand("AT+CIPSEND=" + String(postRequest.length()), ">", 1000);
+    esp8266.print(postRequest);
+    sendATCommand("", "SEND OK", 1000);
+    sendATCommand("AT+CIPCLOSE", "OK", 1000);
 }
