@@ -12,6 +12,8 @@ Cry of the Lost star | satellite flight control system
 - 将舵机的信号线连接到Arduino UNO的数字引脚，比如Pin 9或Pin 10。
 - 将舵机的电源（通常是+5V）连接到Arduino UNO的5V引脚。
 - 将舵机的地线连接到Arduino UNO的GND引脚。
+- GPS模块通常使用串口通信，因此可以直接连接到Arduino UNO的硬件串口（RX和TX引脚）。
+- 如果使用的是软件串口，确保将GPS模块的TX连接到Arduino的软件串口RX引脚，而GPS模块的RX连接到Arduino的软件串口TX引脚。
 - 烧录 Mayoiuta
 
 Enjoy your fly!

@@ -3,8 +3,10 @@
 #include <MPU6050.h>
 #include <Servo.h>
 #include <SoftwareSerial.h>
+#include <TinyGPS++.h>
 
 SoftwareSerial esp8266(2, 3); // RX, TX
+SoftwareSerial gpsSerial(4, 5); // RX, TX for GPS module
 
 // WiFi连接信息
 const char* ssid = "mainly";
@@ -18,6 +20,7 @@ Adafruit_BMP085 bmp;
 MPU6050 mpu;
 Servo servoX;
 Servo servoY;
+TinyGPSPlus gps;
 
 // 伺服电机引脚
 const int servoXPin = 9;
@@ -39,6 +42,7 @@ double errorY, lastErrorY, outputY;
 void setup() {
     Serial.begin(9600);
     esp8266.begin(115200); // ESP8266 baud rate
+    gpsSerial.begin(9600); // GPS module baud rate
 
     // 初始化WiFi连接
     connectWiFi();
@@ -70,6 +74,19 @@ void setup() {
 }
 
 void loop() {
+    // 更新GPS数据
+    while (gpsSerial.available() > 0) {
+        if (gps.encode(gpsSerial.read())) {
+            if (gps.location.isValid()) {
+                Serial.print("Latitude: ");
+                Serial.print(gps.location.lat(), 6);
+                Serial.print(" Longitude: ");
+                Serial.println(gps.location.lng(), 6);
+            }
+        }
+    }
+
+    // 获取气压和姿态数据
     Serial.print("Temperature = "); 
     Serial.print(bmp.readTemperature());
     Serial.println(" *C");
@@ -93,7 +110,10 @@ void loop() {
     Serial.println(" degrees");
     computePID(servoX, pitch, pidSetpointX, pidOutputX, pidInputX, lastErrorX, outputX);
     computePID(servoY, roll, pidSetpointY, pidOutputY, pidInputY, lastErrorY, outputY);
+
+    // 发送数据到服务器
     sendDataToServer(pitch, roll);
+
     delay(500);
 }
 
@@ -134,9 +154,13 @@ void computePID(Servo &servo, double input, double setpoint, double &output, dou
     previousTime = currentTime;
 }
 
-// 发送数据到服务器
+// 发送数据到服务器，包括GPS数据
 void sendDataToServer(float pitch, float roll) {
     String data = "pitch=" + String(pitch) + "&roll=" + String(roll);
+    if (gps.location.isValid()) {
+        data += "&latitude=" + String(gps.location.lat(), 6) +
+                "&longitude=" + String(gps.location.lng(), 6);
+    }
     String postRequest = "POST / HTTP/1.1\r\n" +
                             "Host: " + String(server) + "\r\n" +
                             "Content-Type: application/x-www-form-urlencoded\r\n" +
