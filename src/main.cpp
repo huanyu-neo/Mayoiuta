@@ -4,16 +4,11 @@
 #include <Servo.h>
 #include <SoftwareSerial.h>
 #include <TinyGPS++.h>
+#include <RH_RF95.h>
 
-SoftwareSerial esp8266(2, 3); // RX, TX
-SoftwareSerial gpsSerial(4, 5); // RX, TX for GPS module
-
-// WiFi连接信息
-const char* ssid = "mainly";
-const char* password = "";
-
-// 服务器信息
-const char* server = "data.awaland.xyz";
+// 创建LoRa对象，使用SoftwareSerial通信
+SoftwareSerial loraSerial(4, 5); // RX, TX for LoRa module
+RH_RF95 rf95;
 
 // 创建传感器和伺服电机对象
 Adafruit_BMP085 bmp;
@@ -41,11 +36,15 @@ double errorY, lastErrorY, outputY;
 
 void setup() {
     Serial.begin(9600);
-    esp8266.begin(115200); // ESP8266 baud rate
-    gpsSerial.begin(9600); // GPS module baud rate
+    loraSerial.begin(9600); // LoRa模块波特率
 
-    // 初始化WiFi连接
-    connectWiFi();
+    // 初始化LoRa模块
+    if (!rf95.init()) {
+        Serial.println("LoRa init failed");
+        while (1);
+    }
+    rf95.setFrequency(915.0); // 根据实际频段设置
+    rf95.setTxPower(23, false); // 根据实际模块参数设置
 
     // 初始化气压传感器
     if (!bmp.begin()) {
@@ -75,8 +74,8 @@ void setup() {
 
 void loop() {
     // 更新GPS数据
-    while (gpsSerial.available() > 0) {
-        if (gps.encode(gpsSerial.read())) {
+    while (loraSerial.available() > 0) {
+        if (gps.encode(loraSerial.read())) {
             if (gps.location.isValid()) {
                 Serial.print("Latitude: ");
                 Serial.print(gps.location.lat(), 6);
@@ -111,29 +110,10 @@ void loop() {
     computePID(servoX, pitch, pidSetpointX, pidOutputX, pidInputX, lastErrorX, outputX);
     computePID(servoY, roll, pidSetpointY, pidOutputY, pidInputY, lastErrorY, outputY);
 
-    // 发送数据到服务器
-    sendDataToServer(pitch, roll);
+    // 发送数据到地面站
+    sendDataToGroundStation(pitch, roll);
 
     delay(500);
-}
-
-// 连接WiFi函数
-void connectWiFi() {
-    sendATCommand("AT", "OK", 1000);
-    sendATCommand("AT+CWMODE=1", "OK", 1000);
-    sendATCommand("AT+CWJAP=\"" + String(ssid) + "\",\"" + String(password) + "\"", "OK", 10000);
-}
-
-void sendATCommand(String command, String response, unsigned long timeout) {
-    esp8266.println(command);
-    unsigned long start = millis();
-    while (millis() - start < timeout) {
-        if (esp8266.find(response.c_str())) {
-            Serial.println(command + " executed successfully");
-            return;
-        }
-    }
-    Serial.println(command + " failed");
 }
 
 // PID计算函数
@@ -154,22 +134,20 @@ void computePID(Servo &servo, double input, double setpoint, double &output, dou
     previousTime = currentTime;
 }
 
-// 发送数据到服务器，包括GPS数据
-void sendDataToServer(float pitch, float roll) {
+// 发送数据到地面站，包括GPS数据
+void sendDataToGroundStation(float pitch, float roll) {
     String data = "pitch=" + String(pitch) + "&roll=" + String(roll);
     if (gps.location.isValid()) {
         data += "&latitude=" + String(gps.location.lat(), 6) +
                 "&longitude=" + String(gps.location.lng(), 6);
     }
-    String postRequest = "POST / HTTP/1.1\r\n" +
-                            "Host: " + String(server) + "\r\n" +
-                            "Content-Type: application/x-www-form-urlencoded\r\n" +
-                            "Content-Length: " + data.length() + "\r\n" +
-                            "\r\n" + data;
 
-    sendATCommand("AT+CIPSTART=\"TCP\",\"" + String(server) + "\",80", "OK", 10000);
-    sendATCommand("AT+CIPSEND=" + String(postRequest.length()), ">", 1000);
-    esp8266.print(postRequest);
-    sendATCommand("", "SEND OK", 1000);
-    sendATCommand("AT+CIPCLOSE", "OK", 1000);
+    // 将数据转换为字符数组
+    char dataToSend[data.length() + 1];
+    data.toCharArray(dataToSend, data.length() + 1);
+
+    // 发送数据
+    rf95.send((uint8_t *)dataToSend, sizeof(dataToSend));
+    rf95.waitPacketSent();
 }
+

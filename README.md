@@ -2,13 +2,10 @@
 Cry of the Lost star | satellite flight control system
 
 ## 硬件连接
-首先，将ESP8266模块连接到Arduino UNO：
 
-- ESP8266 VCC 连接到 Arduino 3.3V
-- ESP8266 GND 连接到 Arduino GND
-- ESP8266 TX 连接到 Arduino RX (Pin 0)
-- ESP8266 RX 通过电压分压器（或电阻分压器）连接到 Arduino TX (Pin 1)
-- ESP8266 CH_PD 连接到 Arduino 3.3V
+- 根据你使用的LoRa模块的具体型号，将其连接到Arduino UNO的硬件串口或软件串口。通常，LoRa模块使用UART通信，连接方式如下：
+- LoRa模块的TX连接到Arduino的软件串口RX引脚（例如4号引脚）
+- LoRa模块的RX连接到Arduino的软件串口TX引脚（例如5号引脚）
 - 将舵机的信号线连接到Arduino UNO的数字引脚，比如Pin 9或Pin 10。
 - 将舵机的电源（通常是+5V）连接到Arduino UNO的5V引脚。
 - 将舵机的地线连接到Arduino UNO的GND引脚。
